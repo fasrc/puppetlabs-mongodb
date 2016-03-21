@@ -231,7 +231,7 @@ class mongodb::server::config {
   }
 
   if $auth and $store_creds {
-    file { $rcfile:
+    node_encrypt::file { $rcfile:
       ensure  => present,
       content => template('mongodb/mongorc.js.erb'),
       owner   => 'root',
