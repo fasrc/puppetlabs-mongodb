@@ -231,12 +231,13 @@ class mongodb::server::config {
   }
 
   if $auth and $store_creds {
-    node_encrypt::file { $rcfile:
+    file { $rcfile:
       ensure  => present,
-      content => node_encrypt(template('mongodb/mongorc.js.erb')),
+      content => template('mongodb/mongorc.js.erb'),
       owner   => 'root',
       group   => 'root',
-      mode    => '0600'
+      mode    => '0600',
+      show_diff => false
     }
   } else {
     file { $rcfile:
