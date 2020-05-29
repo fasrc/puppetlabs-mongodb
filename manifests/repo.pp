@@ -1,83 +1,78 @@
 # PRIVATE CLASS: do not use directly
 class mongodb::repo (
-  $ensure         = $mongodb::params::ensure,
-  $version        = $mongodb::params::version,
-  $repo_location  = undef,
-  $proxy          = undef,
-  $proxy_username = undef,
-  $proxy_password = undef,
-) inherits mongodb::params {
-  case $::osfamily {
+  Variant[Enum['present', 'absent'], Boolean] $ensure = 'present',
+  Optional[String] $version                           = undef,
+  Boolean $use_enterprise_repo                        = false,
+  Optional[String] $repo_location                     = undef,
+  Optional[String] $proxy                             = undef,
+  Optional[String] $proxy_username                    = undef,
+  Optional[String] $proxy_password                    = undef,
+  Optional[String[1]] $aptkey_options                 = undef,
+) {
+  case $facts['os']['family'] {
     'RedHat', 'Linux': {
-      if ($repo_location != undef){
+      if $repo_location != undef {
         $location = $repo_location
         $description = 'MongoDB Custom Repository'
-      } elsif $mongodb::globals::use_enterprise_repo == true {
-        $location = 'https://repo.mongodb.com/yum/redhat/$releasever/mongodb-enterprise/stable/$basearch/'
-        $description = 'MongoDB Enterprise Repository'
-      }
-      elsif $version and (versioncmp($version, '3.0.0') >= 0) {
+      } elsif $version == undef or versioncmp($version, '3.0.0') < 0 {
+        fail('Package repositories for versions older than 3.0 are unsupported')
+      } else {
         $mongover = split($version, '[.]')
-        $location = $::architecture ? {
-          'x86_64' => "http://repo.mongodb.org/yum/redhat/${::operatingsystemmajrelease}/mongodb-org/${mongover[0]}.${mongover[1]}/x86_64/",
-          default  => undef
+        if $use_enterprise_repo {
+          $location = "https://repo.mongodb.com/yum/redhat/\$releasever/mongodb-enterprise/${mongover[0]}.${mongover[1]}/\$basearch/"
+          $description = 'MongoDB Enterprise Repository'
+        } else {
+          $location = "https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/${mongover[0]}.${mongover[1]}/\$basearch/"
+          $description = 'MongoDB Repository'
         }
-        $description = 'MongoDB-org'
-      }
-      else {
-        $location = $::architecture ? {
-          'x86_64' => 'http://downloads-distro.mongodb.org/repo/redhat/os/x86_64/',
-          'i686'   => 'http://downloads-distro.mongodb.org/repo/redhat/os/i686/',
-          'i386'   => 'http://downloads-distro.mongodb.org/repo/redhat/os/i686/',
-          default  => undef
-        }
-        $description = 'MongoDB/10gen Repository'
       }
 
-      class { '::mongodb::repo::yum': }
+      contain mongodb::repo::yum
     }
 
     'Debian': {
-      if ($repo_location != undef){
+      if $repo_location != undef {
         $location = $repo_location
-      }
-      elsif $version and (versioncmp($version, '3.0.0') >= 0) {
+      } elsif $version == undef or versioncmp($version, '3.0.0') < 0 {
+        fail('Package repositories for versions older than 3.0 are unsupported')
+      } else {
+        if $use_enterprise_repo == true {
+          $repo_domain = 'repo.mongodb.com'
+          $repo_path   = 'mongodb-enterprise'
+        } else {
+          $repo_domain = 'repo.mongodb.org'
+          $repo_path   = 'mongodb-org'
+        }
+
         $mongover = split($version, '[.]')
-        $location = $::operatingsystem ? {
-          'Debian' => 'https://repo.mongodb.org/apt/debian',
-          'Ubuntu' => 'https://repo.mongodb.org/apt/ubuntu',
+        $location = $facts['os']['name'] ? {
+          'Debian' => "https://${repo_domain}/apt/debian",
+          'Ubuntu' => "https://${repo_domain}/apt/ubuntu",
           default  => undef
         }
-        # Temp hack. Need to follow https://jira.mongodb.org/browse/SERVER-18329
-        if ($::lsbdistcodename == 'jessie') {
-          $release     = "wheezy/mongodb-org/${mongover[0]}.${mongover[1]}"
-        } else {
-          $release     = "${::lsbdistcodename}/mongodb-org/${mongover[0]}.${mongover[1]}"
-        }
-        $repos       = $::operatingsystem ? {
+        $release     = "${facts['os']['distro']['codename']}/${repo_path}/${mongover[0]}.${mongover[1]}"
+        $repos       = $facts['os']['name'] ? {
           'Debian' => 'main',
           'Ubuntu' => 'multiverse',
           default => undef
         }
-        $key         = '492EAFE8CD016A07919F1D2B9ECBEC467F0CEB10'
-        $key_server  = 'hkp://keyserver.ubuntu.com:80'
-      } else {
-        $location = $::operatingsystem ? {
-          'Debian' => 'http://downloads-distro.mongodb.org/repo/debian-sysvinit',
-          'Ubuntu' => 'http://downloads-distro.mongodb.org/repo/ubuntu-upstart',
-          default  => undef
+        $key = "${mongover[0]}.${mongover[1]}" ? {
+          '4.2'   => 'E162F504A20CDF15827F718D4B7C549A058F8B6B',
+          '4.0'   => '9DA31620334BD75D9DCB49F368818C72E52529D4',
+          '3.6'   => '2930ADAE8CAF5059EE73BB4B58712A2291FA4AD5',
+          '3.4'   => '0C49F3730359A14518585931BC711F9BA15703C6',
+          '3.2'   => '42F3E95A2C4F08279C4960ADD68FA50FEA312927',
+          default => '492EAFE8CD016A07919F1D2B9ECBEC467F0CEB10'
         }
-        $release     = 'dist'
-        $repos       = '10gen'
-        $key         = '492EAFE8CD016A07919F1D2B9ECBEC467F0CEB10'
-        $key_server  = 'hkp://keyserver.ubuntu.com:80'
+        $key_server = 'hkp://keyserver.ubuntu.com:80'
       }
-      class { '::mongodb::repo::apt': }
+
+      contain mongodb::repo::apt
     }
 
     default: {
       if($ensure == 'present' or $ensure == true) {
-        fail("Unsupported managed repository for osfamily: ${::osfamily}, operatingsystem: ${::operatingsystem}, module ${module_name} currently only supports managing repos for osfamily RedHat, Debian and Ubuntu")
+        fail("Unsupported managed repository for osfamily: ${facts['os']['family']}, operatingsystem: ${facts['os']['name']}, module ${module_name} currently only supports managing repos for osfamily RedHat, Debian and Ubuntu")
       }
     }
   }
